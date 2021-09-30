@@ -20,16 +20,19 @@ var mongodb = require('mongodb');
 
 var axios = require('axios');
 
-var Razorpay = require("razorpay");
+var cors = require('cors');
 
-var cfg = require("./config.js");
+var Razorpay = require("razorpay");
 
 require("./src/db/conn"); // require("./src/db/docconn");
 
 
 app.use(express["static"]('public'));
 app.use(express["static"]('images'));
-app.use(express.urlencoded());
+app.use(express.urlencoded({
+  extended: false
+}));
+app.use(cors());
 
 var Register = require("./src/models/userregister");
 
@@ -39,6 +42,10 @@ var Documents = require("./src/models/docschema"); // const { Db } = require("mo
 var port = process.env.PORT || 3000;
 var template_path = path.join(__dirname, "./templates/views");
 var image_path = path.join(__dirname, "./images");
+var rzpInstance = new Razorpay({
+  key_id: 'rzp_test_Za2z7I4DwM3hq2',
+  key_secret: '0vLzh7U4MDCCToBIyUG2xKZl'
+});
 app.use(express.json());
 app.use(express.urlencoded({
   extended: false
@@ -49,26 +56,7 @@ app.use(bodyParser.urlencoded({
 app.set("view engine", "hbs");
 app.set('views', './templates/views');
 app.set("views", template_path);
-app.set("images", image_path); // new Razorpay instance to make API calls
-
-var rzpInstance = new Razorpay({
-  key_id: cfg.key_id(),
-  key_secret: cfg.key_secret()
-}); // object to store donation details and push to database
-
-function Donation(invoiceId, orderId, receipt, customerDetails, amount, paymentURL) {
-  this.invoice_id = invoiceId;
-  this.order_id = orderId;
-  this.receipt = receipt;
-  this.customer_details = {
-    "id": customerDetails.id.toString(),
-    "name": customerDetails.name.toString(),
-    "email": customerDetails.email.toString(),
-    "contact": customerDetails.contact.toString()
-  }, this.amount = amount, this.short_url = paymentURL;
-}
-
-;
+app.set("images", image_path);
 app.get("/", function (req, res) {
   return res.render("index");
 });
@@ -112,6 +100,68 @@ app.get('/news', function _callee(req, res) {
 });
 app.get("/donation", function (req, res) {
   return res.render("donation");
+}); // object to store donation details and push to database
+
+function Donation(invoiceId, orderId, receipt, customerDetails, amount, paymentURL) {
+  this.invoice_id = invoiceId;
+  this.order_id = orderId;
+  this.receipt = receipt;
+  this.customer_details = {
+    "id": customerDetails.id.toString(),
+    "name": customerDetails.name.toString(),
+    "email": customerDetails.email.toString()
+  }, this.amount = amount, this.short_url = paymentURL;
+}
+
+;
+app.post("/newDonation", function (req, res) {
+  var name = req.body.name;
+  var email = req.body.email;
+  var amount = req.body.amount;
+  var receipt = (Math.random() * 0xffffff * 10000000000).toString(16).slice(0, 6);
+  var callbackURL = "/donationthanks"; // object to store invoice API options
+
+  var invoiceOptions = {
+    "type": "invoice",
+    "description": "Invoice for test donation",
+    "customer": {
+      "name": name,
+      "email": email
+    },
+    "line_items": [{
+      "name": "Donation",
+      "description": "Donation cause",
+      "amount": amount
+    }],
+    "date": Math.round(Date.now() / 1000),
+    "receipt": receipt,
+    "callback_method": "get" // "callback_url": "./donationthanks"
+
+  }; // creating a new invoice
+
+  rzpInstance.invoices.create(invoiceOptions, function (error, invoice) {
+    if (error) {
+      console.log(error);
+    } else {
+      var invoiceId = invoice.id.toString();
+      var orderId = invoice.order_id.toString();
+      var customerDetails = {
+        "id": invoice.customer_details.id.toString(),
+        "name": invoice.customer_details.name.toString(),
+        "email": invoice.customer_details.email.toString()
+      };
+
+      var _amount = invoice.amount.toString();
+
+      var paymentURL = invoice.short_url.toString();
+      var currentDonation = new Donation(invoiceId, orderId, receipt, customerDetails, _amount, paymentURL); //console.log(currentDonation);
+
+      res.json(paymentURL);
+    }
+  });
+});
+app.get("/donationthanks", function (req, res) {
+  return res.sendFile("donationthanks");
 });
 app.post("/register", function _callee2(req, res) {
   var password, cpassword, userRegister, registered;
@@ -303,52 +353,6 @@ app.post('/uploadmultiple', upload.array('Document'), docUpload);
 module.exports = {
   docUpload: docUpload
 };
-app.post("/newDonation", function (req, res) {
-  var name = req.body.name;
-  var email = req.body.email;
-  var amount = req.body.amount;
-  var receipt = (Math.random() * 0xffffff * 10000000000).toString(16).slice(0, 6);
-  var callbackURL = "https://rzp-integration.herokuapp.com/thankYou"; // object to store invoice API options
-
-  var invoiceOptions = {
-    "type": "invoice",
-    "description": "Invoice for test donation",
-    "customer": {
-      "name": name,
-      "email": email
-    },
-    "line_items": [{
-      "name": "Donation",
-      "description": "Donation cause",
-      "amount": amount
-    }],
-    "date": Math.round(Date.now() / 1000),
-    "receipt": receipt,
-    "callback_method": "get",
-    "callback_url": callbackURL
-  }; // creating a new invoice
-
-  rzpInstance.invoices.create(invoiceOptions, function (error, invoice) {
-    if (error) {
-      console.log(error);
-    } else {
-      var invoiceId = invoice.id.toString();
-      var orderId = invoice.order_id.toString();
-      var customerDetails = {
-        "id": invoice.customer_details.id.toString(),
-        "name": invoice.customer_details.name.toString(),
-        "email": invoice.customer_details.email.toString()
-      };
-
-      var _amount = invoice.amount.toString();
-
-      var paymentURL = invoice.short_url.toString();
-      var currentDonation = new Donation(invoiceId, orderId, receipt, customerDetails, _amount, paymentURL); //console.log(currentDonation);
-
-      res.json(paymentURL);
-    }
-  });
-});
 app.listen(port, function () {
   console.log("server is running at port: ", port);
 });
